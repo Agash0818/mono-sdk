@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mono-m2m-sdk"
-version = "0.4.0"
+version = "0.4.1"
 description = "Financial infrastructure for autonomous AI agents — monospay.com"
 readme = "README.md"
 requires-python = ">=3.9"

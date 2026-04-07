@@ -22,7 +22,7 @@ from mono_sdk.models import HealthStatus, NodeInfo, SettleResult
 logger = logging.getLogger("mono_sdk")
 
 # Public-facing API — no Supabase URL exposed
-DEFAULT_BASE_URL   = "https://api.monospay.com/v1"
+DEFAULT_BASE_URL   = "https://mono-production-b257.up.railway.app/v1"
 DEFAULT_TIMEOUT    = 30
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_BASE = 1.0

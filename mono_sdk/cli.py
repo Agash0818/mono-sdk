@@ -28,7 +28,7 @@ from mono_sdk.errors import MonoError
 # ── Config file location ──────────────────────────────────────────────────────
 MONO_DIR    = Path.home() / ".mono"
 CONFIG_FILE = MONO_DIR / "config.json"
-DEFAULT_API = "https://api.monospay.com/v1"
+DEFAULT_API = "https://mono-production-b257.up.railway.app/v1"
 
 # ── Default provider settings (zero-config out of the box) ───────────────────
 DEFAULTS = {
