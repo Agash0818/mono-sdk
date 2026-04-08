@@ -13,7 +13,7 @@ jobs:
       - run: pip install build twine
       - run: python -m build
         working-directory: sdk
-      - run: twine upload dist/*
+      - run: twine upload --skip-existing dist/*
         working-directory: sdk
         env:
           TWINE_USERNAME: __token__
