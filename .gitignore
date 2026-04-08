@@ -11,3 +11,14 @@ sdk_build/
 _nuitka_build/
 *.so
 *.pyd
+
+# Ghost-Dateien im Repo-Root — gehören nicht ins Repo.
+# Der echte Code liegt ausschliesslich in mono_sdk/
+/cli.py
+/client.py
+/errors.py
+/models.py
+/langchain_tools.py
+/openai_functions.py
+/build_wheels.py
+/__init__.py
