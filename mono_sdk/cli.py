@@ -1,13 +1,12 @@
 """
-mono CLI: Command-line interface for the mono settlement network.
+mono CLI — Control plane for the mono M2M settlement network.
 
-Commands:
-    mono init                          Zero-config setup wizard
-    mono health                        Check system health
-    mono settle --to <id> --amount 0.5 Execute a settlement
-    mono status                        Show fleet status and balances
-    mono nodes list/create/kill        Manage agent nodes
-    mono config show/set/clear         Manage local configuration
+MVP: One thing done perfectly.
+  1. User pastes API key from dashboard
+  2. CLI resolves agent identity automatically via /balance
+  3. User can immediately transfer: mono transfer --to <id> --amount 0.01
+
+The API key IS the agent. No manual assignment. No extra steps.
 """
 
 from __future__ import annotations
@@ -16,31 +15,45 @@ import argparse
 import json
 import os
 import sys
-import time
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import Any
 
 from mono_sdk.client import MonoClient
 from mono_sdk.errors import MonoError
 
-# ── Config file location ──────────────────────────────────────────────────────
+# ── ANSI ──────────────────────────────────────────────────────────────────────
+R    = "\033[0m"
+BOLD = "\033[1m"
+DIM  = "\033[2m"
+GRN  = "\033[32m"
+RED  = "\033[31m"
+YLW  = "\033[33m"
+
+# ── Config ────────────────────────────────────────────────────────────────────
 MONO_DIR    = Path.home() / ".mono"
 CONFIG_FILE = MONO_DIR / "config.json"
 DEFAULT_API = "https://mono-production-b257.up.railway.app/v1"
 
-# ── Default provider settings (zero-config out of the box) ───────────────────
 DEFAULTS = {
-    "base_rpc_url":       "https://mainnet.base.org",
-    "base_sepolia_rpc":   "https://sepolia.base.org",
-    "paymaster_url":      "https://api.monospay.com/paymaster",
-    "gateway_url":        DEFAULT_API,
-    "chain":              "base",
-    "chain_id":           8453,
-    "usdc_address":       "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    "eurc_address":       "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+    "base_rpc_url":  "https://mainnet.base.org",
+    "paymaster_url": "https://api.monospay.com/paymaster",
+    "gateway_url":   DEFAULT_API,
+    "chain":         "base",
+    "chain_id":      8453,
+    "usdc_address":  "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "eurc_address":  "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
 }
+
+_INTERNAL_KEYS = {"_test_key", "base_sepolia_rpc"}
+
+
+def tilde(path: Path) -> str:
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
+
 
 # ── Config helpers ────────────────────────────────────────────────────────────
 
@@ -54,205 +67,159 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
+    clean = {k: v for k, v in cfg.items() if k not in _INTERNAL_KEYS}
     MONO_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
-    CONFIG_FILE.chmod(0o600)  # owner-read only (contains API key)
+    CONFIG_FILE.write_text(json.dumps(clean, indent=2))
+    CONFIG_FILE.chmod(0o600)
 
 
 def get_setting(key: str, fallback: str | None = None) -> str | None:
-    """Resolution order: env var → config file → default."""
-    env_key = f"MONO_{key.upper()}"
-    if val := os.environ.get(env_key):
+    if val := os.environ.get(f"MONO_{key.upper()}"):
         return val
-    cfg = load_config()
-    if val := cfg.get(key):
-        return val
-    if key in DEFAULTS:
-        return str(DEFAULTS[key])
-    return fallback
+    if val := load_config().get(key):
+        return str(val)
+    return str(DEFAULTS[key]) if key in DEFAULTS else fallback
 
 
 def get_api_key() -> str | None:
-    return get_setting("api_key") or os.environ.get("MONO_API_KEY")
+    return os.environ.get("MONO_API_KEY") or load_config().get("api_key")
 
 
 def get_client() -> MonoClient:
-    api_key = get_api_key()
-    if not api_key:
-        print("\n  ✗  No API key found.\n", file=sys.stderr)
-        print("     Run:  mono init\n", file=sys.stderr)
+    key = get_api_key()
+    if not key:
+        print(f"\n  {RED}✗{R}  No API key found.\n", file=sys.stderr)
+        print(f"     Run:  mono init\n", file=sys.stderr)
         sys.exit(1)
-    return MonoClient(
-        api_key=api_key,
-        base_url=get_setting("gateway_url") or DEFAULT_API,
-    )
+    return MonoClient(api_key=key, base_url=get_setting("gateway_url") or DEFAULT_API)
 
 
-# ── Shell profile helpers ──────────────────────────────────────────────────────
+# ── Shell profile ─────────────────────────────────────────────────────────────
 
 def detect_shell_profile() -> Path:
     shell = os.environ.get("SHELL", "")
     home  = Path.home()
-    if   "zsh"  in shell: return home / ".zshrc"
-    elif "bash" in shell: return home / ".bash_profile"
-    else:                 return home / ".profile"
+    if "zsh"  in shell: return home / ".zshrc"
+    if "bash" in shell: return home / ".bash_profile"
+    return home / ".profile"
 
 
 def write_env_to_profile(key: str, value: str) -> None:
-    """Idempotently write export KEY=value to shell profile."""
     profile = detect_shell_profile()
     line    = f'export {key}="{value}"'
     try:
         text = profile.read_text() if profile.exists() else ""
         if f"export {key}=" in text:
-            # Replace existing
-            lines = text.splitlines()
-            lines = [line if l.startswith(f"export {key}=") else l for l in lines]
+            lines = [line if l.startswith(f"export {key}=") else l
+                     for l in text.splitlines()]
             profile.write_text("\n".join(lines) + "\n")
         else:
             with profile.open("a") as f:
                 f.write(f"\n# mono SDK\n{line}\n")
     except PermissionError:
-        pass  # Non-fatal — config file has the value
+        pass
 
 
-def test_connection(api_key: str, gateway_url: str) -> bool:
-    """Quick health check against the API."""
+def _resolve_agent(api_key: str, gateway_url: str) -> dict:
+    """
+    Call /balance to resolve which agent this key belongs to.
+    Returns dict with agent_id, agent_name, balance_usdc.
+    Never raises — returns empty dict on failure.
+    """
     try:
-        req = urllib.request.Request(
-            f"{gateway_url.rstrip('/')}/health",
-            headers={"Authorization": f"Bearer {api_key}"},
-        )
-        with urllib.request.urlopen(req, timeout=8) as r:
-            data = json.loads(r.read())
-            return data.get("status") in ("HEALTHY", "OK", "ok")
-    except urllib.error.HTTPError as e:
-        return e.code == 401  # only 401 means server is reachable
+        client = MonoClient(api_key=api_key, base_url=gateway_url)
+        bal    = client.balance()
+        return {
+            "agent_id":   bal.get("agent_id", ""),
+            "agent_name": bal.get("name", ""),
+            "balance":    float(str(bal.get("balance_usdc", bal.get("available_usdc", 0))).replace(",", ".")),
+        }
     except Exception:
-        return False
+        return {}
 
 
 # ── mono init ─────────────────────────────────────────────────────────────────
 
 def cmd_init(args: argparse.Namespace) -> None:
-    """Zero-config setup wizard. All defaults pre-set — only API key needed."""
+    """
+    MVP setup flow:
+    1. Ask for API key (or detect existing)
+    2. Call /balance → resolve agent_id + agent_name automatically
+    3. Save to ~/.mono/config.json
+    4. Show: ✅ Connected as <Agent Name> · $X.XX USDC
+    """
     print()
-    print("  \033[1mmono init\033[0m  Setting up your environment\n")
+    print(f"  {BOLD}mono init{R}  Setting up your environment\n")
 
-    cfg = load_config()
+    cfg      = load_config()
+    existing = get_api_key()
 
-    # ── Step 1: API key ────────────────────────────────────────────────────────
-    existing_key = get_api_key()
-
-    if existing_key and not args.force:
-        masked = f"{existing_key[:15]}...{existing_key[-4:]}"
-        print(f"  \033[32m✓\033[0m  API key:  {masked}  (already configured)\n")
-        api_key = existing_key
+    # ── Step 1: Get API key ───────────────────────────────────────────────────
+    if existing and not args.force:
+        # Key exists — but still resolve agent identity to confirm it works
+        masked = f"{existing[:15]}...{existing[-4:]}"
+        print(f"  {GRN}✓{R}  API key:  {masked}\n")
+        api_key = existing
     else:
-        print("  Get your API key at: \033[1mhttps://monospay.com/dashboard\033[0m\n")
-        print("  \033[2mPaste it below and press Enter.\033[0m")
+        # New setup: ask for key
+        print(f"  {BOLD}Where to get your API key:{R}")
+        print(f"  {DIM}monospay.com/dashboard → Agents → your agent → Issue API key{R}\n")
         try:
-            api_key = input("  MONO_API_KEY: ").strip()
+            api_key = input("  Paste API key: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\n\n  Setup cancelled.\n")
             sys.exit(0)
 
         if not api_key:
-            print("\n  \033[33m!\033[0m  Skipped — set MONO_API_KEY later.\n")
-            api_key = ""
-        elif not api_key.startswith("mono_live_"):
-            print("\n  \033[33m!\033[0m  Warning: key should start with 'mono_live_'\n")
+            print(f"\n  {YLW}!{R}  No key entered. Run mono init again when ready.\n")
+            sys.exit(0)
 
-    # ── Step 2: Provider settings — all pre-configured, no user input needed ──
-    print()
-    print("  Configuring provider settings...\n")
+        if not api_key.startswith("mono_live_"):
+            print(f"\n  {YLW}!{R}  Key should start with 'mono_live_' — double-check the dashboard.\n")
 
-    # Detect environment
-    is_cloud = any([
-        os.environ.get("GITHUB_ACTIONS"),
-        os.environ.get("CI"),
-        os.environ.get("RAILWAY_ENVIRONMENT"),
-        os.environ.get("FLY_APP_NAME"),
-        os.environ.get("RENDER"),
-        os.environ.get("HEROKU_APP_NAME"),
-        not sys.stdin.isatty() and not existing_key,
-    ])
-
-    chain       = "base"
-    chain_id    = 8453
-    rpc_url     = DEFAULTS["base_rpc_url"]
-    paymaster   = DEFAULTS["paymaster_url"]
+    # ── Step 2: Save config ───────────────────────────────────────────────────
     gateway_url = DEFAULT_API
-
-    # Apply to config
     cfg.update({
-        "gateway_url":    gateway_url,
-        "base_rpc_url":   rpc_url,
-        "paymaster_url":  paymaster,
-        "chain":          chain,
-        "chain_id":       chain_id,
-        "usdc_address":   DEFAULTS["usdc_address"],
-        "eurc_address":   DEFAULTS["eurc_address"],
+        "api_key":     api_key,
+        "gateway_url": gateway_url,
+        "chain":       "base",
+        "chain_id":    8453,
     })
-    if api_key:
-        cfg["api_key"] = api_key
-
     save_config(cfg)
 
-    print(f"  \033[32m✓\033[0m  Network:   Base Mainnet (chain ID {chain_id})")
-    print(f"  \033[32m✓\033[0m  RPC:       {rpc_url}")
-    print(f"  \033[32m✓\033[0m  Paymaster: {paymaster}  (gas sponsored)")
-    print(f"  \033[32m✓\033[0m  USDC:      {DEFAULTS['usdc_address']}")
-    print(f"  \033[32m✓\033[0m  Config:    {CONFIG_FILE}")
+    # Write to shell profile so key persists across terminal sessions
+    write_env_to_profile("MONO_API_KEY", api_key)
 
-    # ── Step 3: Write to shell profile ────────────────────────────────────────
+    # ── Step 3: Resolve agent identity via /balance ───────────────────────────
+    print(f"  Connecting…", end="", flush=True)
+
+    agent = _resolve_agent(api_key, gateway_url)
+
+    if not agent:
+        print(f"\r  {RED}✗{R}  Could not connect — check your API key and try again.\n")
+        print(f"     Run: {BOLD}mono health{R} to check the gateway.\n")
+        sys.exit(1)
+
+    # Save agent identity so all future commands know which agent this is
+    cfg["agent_id"]   = agent["agent_id"]
+    cfg["agent_name"] = agent["agent_name"]
+    save_config(cfg)
+
+    # ── Step 4: Show result — the "Aha moment" ────────────────────────────────
+    name    = agent["agent_name"] or "Agent"
+    balance = agent["balance"]
+
+    print(f"\r  {GRN}✓{R}  Connected to Base Mainnet")
     print()
-    if api_key:
-        write_env_to_profile("MONO_API_KEY", api_key)
-        print(f"  \033[32m✓\033[0m  MONO_API_KEY written to {detect_shell_profile()}")
-    # ── Step 4: Connection test ────────────────────────────────────────────────
+    print(
+        f"  {BOLD}{GRN}✅ Setup complete.{R} "
+        f"Connected as {BOLD}{name}{R}. "
+        f"Your balance: {BOLD}{balance:.2f} USDC{R}"
+    )
     print()
-    if api_key:
-        print("  Testing connection...", end="", flush=True)
-        ok = test_connection(api_key, gateway_url)
-        if ok:
-            print(f"\r  \033[32m✓\033[0m  Connected to monospay.com")
-        else:
-            print(f"\r  \033[33m!\033[0m  Could not connect — check your API key or network")
-
-    # ── Step 5: Setup complete — auto health + balance check ──────────────────
-    print()
-
-    if api_key:
-        gateway_url_check = get_setting("gateway_url") or DEFAULT_API
-        try:
-            req = urllib.request.Request(
-                f"{gateway_url_check.rstrip('/')}/health"
-            )
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                h = json.loads(resp.read())
-            healthy = h.get("status") in ("ok", "OK", "HEALTHY")
-
-            client = MonoClient(api_key=api_key, base_url=gateway_url_check)
-            bal = client.balance()
-            usdc = float(
-                str(bal.get("balance_usdc", bal.get("available_usdc", "0")))
-                .replace(",", ".")
-            )
-
-            if healthy:
-                print(
-                    f"  \033[1m\033[32m✅ Setup complete.\033[0m "
-                    f"Connected to Base Mainnet. "
-                    f"Your current balance is: \033[1m{usdc:.2f} USDC\033[0m"
-                )
-            else:
-                print("  \033[33m⚠️\033[0m  Connected but system degraded.")
-        except Exception:
-            print("  \033[33m!\033[0m  Could not reach API — run: mono health")
-    else:
-        print("  \033[1m\033[32mAll set.\033[0m  Set MONO_API_KEY to get started.")
-
+    print(f"  {DIM}Next steps:{R}")
+    print(f"  {DIM}  mono balance                           — check balance{R}")
+    print(f"  {DIM}  mono transfer --to <agent_id> --amount 1.00{R}")
     print()
 
 
@@ -263,8 +230,10 @@ def cmd_config_show(args: argparse.Namespace) -> None:
     if not cfg:
         print("\n  No config found. Run: mono init\n")
         return
-    print(f"\n  Config file: {CONFIG_FILE}\n")
+    print(f"\n  Config:  {tilde(CONFIG_FILE)}\n")
     for k, v in cfg.items():
+        if k in _INTERNAL_KEYS:
+            continue
         if k == "api_key":
             v = f"{str(v)[:15]}...{str(v)[-4:]}" if v else "(not set)"
         print(f"  {k:<22} {v}")
@@ -275,13 +244,13 @@ def cmd_config_set(args: argparse.Namespace) -> None:
     cfg = load_config()
     cfg[args.key] = args.value
     save_config(cfg)
-    print(f"\n  \033[32m✓\033[0m  {args.key} = {args.value}\n")
+    print(f"\n  {GRN}✓{R}  {args.key} = {args.value}\n")
 
 
 def cmd_config_clear(args: argparse.Namespace) -> None:
     if CONFIG_FILE.exists():
         CONFIG_FILE.unlink()
-    print(f"\n  \033[32m✓\033[0m  Config cleared: {CONFIG_FILE}\n")
+    print(f"\n  {GRN}✓{R}  Config cleared: {tilde(CONFIG_FILE)}\n")
 
 
 # ── mono health ───────────────────────────────────────────────────────────────
@@ -293,23 +262,11 @@ def cmd_health(args: argparse.Namespace) -> None:
         with urllib.request.urlopen(req, timeout=10) as resp:
             h = json.loads(resp.read())
     except Exception:
-        client = get_client()
-        hs = client.health()
-        h = {
-            "status": hs.status, "ledger_sum": hs.ledger_sum,
-            "nodes": {"active": hs.nodes_active, "total": hs.nodes_total},
-            "circuit_breaker": {"active": hs.circuit_breaker_active},
-        }
-
-    st  = h.get("status", "UNKNOWN")
+        print(f"\n  {RED}✗{R}  Gateway unreachable: {gateway}\n")
+        return
+    st   = h.get("status", "UNKNOWN")
     icon = "✅" if st in ("HEALTHY", "OK") else ("⚠️" if st == "WARNING" else "❌")
-    cb   = h.get("circuit_breaker", {})
-    nd   = h.get("nodes", {})
-
     print(f"\n{icon}  {st}")
-    print(f"   Ledger:   {float(h.get('ledger_sum', 0)):.2f} USDC")
-    print(f"   Nodes:    {nd.get('active', '?')}/{nd.get('total', '?')} active")
-    print(f"   Breaker:  {'ACTIVE ⚠️' if cb.get('active') else 'OFF'}")
     print(f"   API:      {gateway}\n")
 
 
@@ -317,33 +274,7 @@ def cmd_health(args: argparse.Namespace) -> None:
 
 def _low_balance_warn(balance: float) -> None:
     if balance < 1.00:
-        print(f"  \033[33m⚠️\033[0m  Low balance — top up at monospay.com/dashboard")
-
-
-# ── mono charge ───────────────────────────────────────────────────────────────
-
-def cmd_charge(args: argparse.Namespace) -> None:
-    client = get_client()
-    result = client.charge(amount=args.amount, memo=args.memo)
-    balance = float(result.get("new_balance", 0))
-    print(f"\n  \033[32m✓\033[0m  Charged ${args.amount:.4f} USDC")
-    if args.memo:
-        print(f"     Memo:    {args.memo}")
-    print(f"     Balance: ${balance:.3f} USDC")
-    _low_balance_warn(balance)
-    print()
-
-
-# ── mono pay ──────────────────────────────────────────────────────────────────
-
-def cmd_pay(args: argparse.Namespace) -> None:
-    client = get_client()
-    result = client.transfer(to=args.agent, amount=args.amount)
-    print(f"\n  \033[32m✓\033[0m  Paid ${args.amount:.2f} USDC → {args.agent}")
-    print(f"     TX:      {result.transaction_id}")
-    print(f"     Balance: ${result.sender_balance:.3f} USDC")
-    _low_balance_warn(result.sender_balance)
-    print()
+        print(f"  {YLW}⚠️{R}  Low balance — top up at monospay.com/dashboard")
 
 
 # ── mono balance ──────────────────────────────────────────────────────────────
@@ -351,11 +282,23 @@ def cmd_pay(args: argparse.Namespace) -> None:
 def cmd_balance(args: argparse.Namespace) -> None:
     client = get_client()
     result = client.balance()
-    usdc = float(str(result.get("balance_usdc", result.get("available_usdc", "0"))).replace(",", "."))
-    name = result.get("name", "agent")
+    usdc   = float(str(result.get("balance_usdc", result.get("available_usdc", "0"))).replace(",", "."))
+    name   = result.get("name", load_config().get("agent_name", "agent"))
     print()
-    print(f"  \033[32m●\033[0m  {name:<22}  ${usdc:.3f} USDC  [active]")
+    print(f"  {GRN}●{R}  {name:<22}  ${usdc:.3f} USDC  [active]")
     _low_balance_warn(usdc)
+    print()
+
+
+# ── mono transfer ─────────────────────────────────────────────────────────────
+
+def cmd_transfer(args: argparse.Namespace) -> None:
+    client = get_client()
+    result = client.transfer(to=args.to, amount=args.amount)
+    print(f"\n  {GRN}✓{R}  Sent {args.amount:.2f} USDC → {args.to}")
+    print(f"     TX:      {result.transaction_id}")
+    print(f"     Balance: {result.sender_balance:.3f} USDC")
+    _low_balance_warn(result.sender_balance)
     print()
 
 
@@ -364,45 +307,24 @@ def cmd_balance(args: argparse.Namespace) -> None:
 def cmd_settle(args: argparse.Namespace) -> None:
     client = get_client()
     result = client.settle(to=args.to, amount=args.amount)
-    print(f"\n\033[32m✓\033[0m  Settlement complete")
-    print(f"   TX:            {result.transaction_id}")
-    print(f"   Amount:        {result.amount:.4f} USDC")
-    print(f"   Your balance:  {result.sender_balance:.4f} USDC\n")
+    print(f"\n  {GRN}✓{R}  Settlement complete")
+    print(f"     TX:      {result.transaction_id}")
+    print(f"     Amount:  {result.amount:.4f} USDC")
+    print(f"     Balance: {result.sender_balance:.4f} USDC\n")
 
 
-# ── mono status ───────────────────────────────────────────────────────────────
+# ── mono charge ───────────────────────────────────────────────────────────────
 
-def cmd_status(args: argparse.Namespace) -> None:
-    client = get_client()
-    nodes  = client.list_nodes()
-    total  = sum(n.balance for n in nodes)
-    active = sum(1 for n in nodes if n.status == "active")
-
-    print(f"\n  Fleet: {len(nodes)} nodes  ·  {active} active  ·  {total:.2f} USDC total\n")
-    for n in nodes:
-        icon  = "\033[32m●\033[0m" if n.status == "active" else "\033[31m○\033[0m"
-        limit = f"  (cap: ${n.spending_limit:.2f})" if n.spending_limit else ""
-        print(f"  {icon}  {n.name:<20}  {n.balance:>10.4f} USDC  [{n.status}]{limit}")
+def cmd_charge(args: argparse.Namespace) -> None:
+    client  = get_client()
+    result  = client.charge(amount=args.amount, memo=args.memo)
+    balance = float(result.get("new_balance", 0))
+    print(f"\n  {GRN}✓{R}  Charged ${args.amount:.4f} USDC")
+    if args.memo:
+        print(f"     Memo:    {args.memo}")
+    print(f"     Balance: ${balance:.3f} USDC")
+    _low_balance_warn(balance)
     print()
-
-
-# ── mono nodes ────────────────────────────────────────────────────────────────
-
-def cmd_nodes_create(args: argparse.Namespace) -> None:
-    client = get_client()
-    node   = client.create_node(name=args.name, spending_limit=args.limit)
-    print(f"\n\033[32m✓\033[0m  Node created")
-    print(f"   ID:    {node.id}")
-    print(f"   Name:  {node.name}")
-    if node.api_key:
-        print(f"\n\033[33m!\033[0m  API key (shown ONCE — copy now):")
-        print(f"   {node.api_key}\n")
-
-
-def cmd_nodes_kill(args: argparse.Namespace) -> None:
-    client = get_client()
-    client.kill_node(args.id)
-    print(f"\n\033[32m✓\033[0m  Node {args.id} killed\n")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -410,96 +332,65 @@ def cmd_nodes_kill(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mono",
-        description="mono SDK CLI — monospay.com",
+        description="mono — Financial infrastructure for AI agents · monospay.com",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Examples:\n"
-            "  mono init                       # First-time setup (run this first)\n"
-            "  mono balance                    # Show your balance\n"
-            "  mono charge 0.003 'gpt-4o call' # Deduct from budget\n"
-            "  mono pay agent_02 1.50          # Pay another agent\n"
-            "  mono health                     # Check system status\n"
-            "  mono status                     # Show your node fleet\n"
-            "  mono settle --to agent_02 --amount 1.50\n"
-            "  mono config show                # Show current config\n"
+            "Getting started:\n"
+            "  mono init                                # Paste your API key\n"
+            "  mono balance                             # Check balance\n"
+            "  mono transfer --to <agent_id> --amount 1.00\n"
+            "\n"
+            "More commands:\n"
+            "  mono settle --to <agent_id> --amount 1.00\n"
+            "  mono health\n"
+            "  mono config show\n"
         ),
     )
-
     sub = parser.add_subparsers(dest="command", metavar="command")
 
     # init
-    p_init = sub.add_parser("init", help="Zero-config setup wizard")
-    p_init.add_argument("--force", action="store_true", help="Re-run even if already configured")
+    p_init = sub.add_parser("init", help="Set up your API key")
+    p_init.add_argument("--force", action="store_true", help="Re-enter key even if already set")
 
     # balance
-    sub.add_parser("balance", help="Show your balance")
+    sub.add_parser("balance", help="Show your USDC balance")
 
-    # charge
-    p_charge = sub.add_parser("charge", help="Deduct from your agent's budget")
-    p_charge.add_argument("amount", type=float, help="Amount in USDC")
-    p_charge.add_argument("memo", nargs="?", default="", help="Optional memo")
-
-    # pay
-    p_pay = sub.add_parser("pay", help="Pay another agent (alias for settle)")
-    p_pay.add_argument("agent", help="Recipient node ID")
-    p_pay.add_argument("amount", type=float, help="Amount in USDC")
-
-    # health
-    sub.add_parser("health", help="Check system health (no auth required)")
-
-    # status
-    sub.add_parser("status", help="Show node fleet and balances")
+    # transfer
+    p_tr = sub.add_parser("transfer", help="Send USDC to another agent")
+    p_tr.add_argument("--to",     required=True,             help="Recipient agent ID")
+    p_tr.add_argument("--amount", required=True, type=float, help="Amount in USDC")
 
     # settle
-    p_settle = sub.add_parser("settle", help="Execute a USDC settlement")
-    p_settle.add_argument("--to",     required=True,  help="Recipient node ID")
-    p_settle.add_argument("--amount", required=True, type=float, help="Amount in USDC")
+    p_se = sub.add_parser("settle", help="Settle USDC to another agent")
+    p_se.add_argument("--to",     required=True,             help="Recipient agent ID")
+    p_se.add_argument("--amount", required=True, type=float, help="Amount in USDC")
 
-    # nodes
-    p_nodes   = sub.add_parser("nodes", help="Manage agent nodes")
-    nodes_sub = p_nodes.add_subparsers(dest="nodes_cmd", metavar="subcommand")
+    # charge
+    p_charge = sub.add_parser("charge", help="Deduct from agent budget")
+    p_charge.add_argument("amount", type=float)
+    p_charge.add_argument("memo", nargs="?", default="")
 
-    nodes_sub.add_parser("list", help="List all nodes")
-
-    p_create = nodes_sub.add_parser("create", help="Create a new node")
-    p_create.add_argument("--name",  required=True, help="Node name")
-    p_create.add_argument("--limit", type=float, default=None, help="Spending cap (USDC)")
-
-    p_kill = nodes_sub.add_parser("kill", help="Kill a node permanently")
-    p_kill.add_argument("--id", required=True, help="Node ID")
+    # health
+    sub.add_parser("health", help="Check gateway status")
 
     # config
-    p_cfg     = sub.add_parser("config", help="Manage configuration")
-    cfg_sub   = p_cfg.add_subparsers(dest="cfg_cmd", metavar="subcommand")
-    cfg_sub.add_parser("show",  help="Show current config")
-    p_cset = cfg_sub.add_parser("set", help="Set a config value")
-    p_cset.add_argument("key");  p_cset.add_argument("value")
-    cfg_sub.add_parser("clear", help="Delete config file")
+    p_cfg   = sub.add_parser("config", help="Manage local config")
+    cfg_sub = p_cfg.add_subparsers(dest="cfg_cmd", metavar="subcommand")
+    cfg_sub.add_parser("show",  help="Show config")
+    p_cset  = cfg_sub.add_parser("set", help="Set a value")
+    p_cset.add_argument("key"); p_cset.add_argument("value")
+    cfg_sub.add_parser("clear", help="Clear config")
 
     args = parser.parse_args()
 
     try:
         cmd = args.command
-        if cmd == "init":
-            cmd_init(args)
-        elif cmd == "balance":
-            cmd_balance(args)
-        elif cmd == "charge":
-            cmd_charge(args)
-        elif cmd == "pay":
-            cmd_pay(args)
-        elif cmd == "health":
-            cmd_health(args)
-        elif cmd == "status":
-            cmd_status(args)
-        elif cmd == "settle":
-            cmd_settle(args)
-        elif cmd == "nodes":
-            nc = getattr(args, "nodes_cmd", None)
-            if   nc == "list":   cmd_status(args)
-            elif nc == "create": cmd_nodes_create(args)
-            elif nc == "kill":   cmd_nodes_kill(args)
-            else:                p_nodes.print_help()
+        if   cmd == "init":     cmd_init(args)
+        elif cmd == "balance":  cmd_balance(args)
+        elif cmd == "transfer": cmd_transfer(args)
+        elif cmd == "settle":   cmd_settle(args)
+        elif cmd == "charge":   cmd_charge(args)
+        elif cmd == "health":   cmd_health(args)
         elif cmd == "config":
             cc = getattr(args, "cfg_cmd", None)
             if   cc == "show":  cmd_config_show(args)
@@ -508,10 +399,10 @@ def main() -> None:
             else:               p_cfg.print_help()
         else:
             parser.print_help()
-            print("\n  \033[2mFirst time? Run: mono init\033[0m\n")
+            print(f"\n  {DIM}First time? Run: mono init{R}\n")
 
     except MonoError as e:
-        print(f"\n  \033[31m✗\033[0m  {e}\n", file=sys.stderr)
+        print(f"\n  {RED}✗{R}  {e}\n", file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:
         print("\n  Aborted.", file=sys.stderr)

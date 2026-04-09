@@ -10,7 +10,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class SettleResult:
-    """Returned by client.settle() on success."""
+    """Returned by client.settle() / client.transfer() on success."""
     transaction_id:    str
     sender_balance:    float
     recipient_balance: float
@@ -18,12 +18,35 @@ class SettleResult:
     status:            str = "SUCCESS"
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> SettleResult:
+    def from_dict(cls, d: dict[str, Any]) -> "SettleResult":
+        # Gateway returns "tx_id" for settle, "transaction_id" for process_m2m_transfer
+        tx_id = (
+            d.get("transaction_id")
+            or d.get("tx_id")
+            or d.get("tx_id", "")
+        )
+        # sender_balance: try several field names across gateway versions
+        sender_bal = (
+            d.get("sender_balance")
+            or d.get("sender_new_balance")
+            or d.get("new_balance_usdc")
+            or 0
+        )
+        recipient_bal = (
+            d.get("recipient_balance")
+            or d.get("receiver_balance")
+            or d.get("recipient_new_balance")
+            or 0
+        )
+        # amount: may be in USDC or micro depending on endpoint
+        raw_amount = d.get("amount", 0)
+        amount = float(raw_amount) if float(raw_amount) < 10_000 else float(raw_amount) / 1_000_000
+
         return cls(
-            transaction_id    = d.get("transaction_id", ""),
-            sender_balance    = float(d.get("sender_balance", 0)),
-            recipient_balance = float(d.get("recipient_balance", 0)),
-            amount            = float(d.get("amount", 0)),
+            transaction_id    = str(tx_id),
+            sender_balance    = float(sender_bal),
+            recipient_balance = float(recipient_bal),
+            amount            = amount,
             status            = d.get("status", "SUCCESS"),
         )
 
@@ -40,7 +63,7 @@ class TrustStats:
     avg_latency_ms:        float | None = None
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any] | None) -> TrustStats:
+    def from_dict(cls, d: dict[str, Any] | None) -> "TrustStats":
         if not d:
             return cls()
         return cls(
@@ -56,26 +79,28 @@ class TrustStats:
 
 @dataclass(frozen=True)
 class NodeInfo:
-    """Returned by client.get_node() and client.create_node()."""
+    """Returned by client.create_node()."""
     id:              str
     name:            str
     balance:         float
     status:          str
-    custody_type:    str  = "managed"
+    custody_type:    str        = "managed"
     wallet_provider: str | None = None
     spending_limit:  float | None = None
-    created_at:      str  = ""
-    api_key:         str | None = None  # Only present on create_node()
+    created_at:      str        = ""
+    api_key:         str | None = None
     trust_stats:     TrustStats = field(default_factory=TrustStats)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any], api_key: str | None = None) -> NodeInfo:
+    def from_dict(cls, d: dict[str, Any], api_key: str | None = None) -> "NodeInfo":
         node = d.get("node", d)
+        # /register returns agent_id, not id
+        node_id = node.get("id") or node.get("agent_id") or d.get("agent_id", "")
         return cls(
-            id             = node.get("id", ""),
+            id             = str(node_id),
             name           = node.get("name", ""),
             balance        = float(node.get("balance", 0)),
-            status         = node.get("status", ""),
+            status         = node.get("status", "active"),
             custody_type   = node.get("custody_type", "managed"),
             wallet_provider= node.get("wallet_provider"),
             spending_limit = float(node["spending_limit"]) if node.get("spending_limit") is not None else None,
@@ -99,7 +124,7 @@ class HealthStatus:
     last_delta:              float
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> HealthStatus:
+    def from_dict(cls, d: dict[str, Any]) -> "HealthStatus":
         nodes = d.get("nodes", {})
         cb    = d.get("circuit_breaker", {})
         return cls(

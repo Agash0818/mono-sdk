@@ -21,29 +21,15 @@ from mono_sdk.models import HealthStatus, NodeInfo, SettleResult
 
 logger = logging.getLogger("mono_sdk")
 
-# Public-facing API — no Supabase URL exposed
-DEFAULT_BASE_URL   = "https://mono-production-b257.up.railway.app/v1"
-DEFAULT_TIMEOUT    = 30
-DEFAULT_MAX_RETRIES = 3
+DEFAULT_BASE_URL     = "https://mono-production-b257.up.railway.app/v1"
+DEFAULT_TIMEOUT      = 30
+DEFAULT_MAX_RETRIES  = 3
 DEFAULT_BACKOFF_BASE = 1.0
 DEFAULT_BACKOFF_MAX  = 16.0
 
 
 class MonoClient:
-    """Client for the mono settlement API.
-
-    Args:
-        api_key:        Your mono API key (starts with 'mono_live_').
-        base_url:       API base URL. Override for self-hosted or staging.
-        timeout:        Request timeout in seconds.
-        max_retries:    Max retry attempts on 503 (circuit breaker).
-        spending_limit: Optional client-side spending limit in USDC.
-
-    Example:
-        >>> client = MonoClient(api_key="mono_live_abc123")
-        >>> result = client.settle(to="node_id", amount=1.50)
-        >>> print(result.sender_balance)
-    """
+    """Client for the mono M2M settlement API."""
 
     def __init__(
         self,
@@ -56,39 +42,55 @@ class MonoClient:
         if not api_key or not api_key.startswith("mono_live_"):
             raise ValueError("API key must start with 'mono_live_'")
 
-        self._api_key       = api_key
-        self._base_url      = base_url.rstrip("/")
-        self._timeout       = timeout
-        self._max_retries   = max_retries
+        self._api_key        = api_key
+        self._base_url       = base_url.rstrip("/")
+        self._timeout        = timeout
+        self._max_retries    = max_retries
         self._spending_limit = spending_limit
 
     # ── Public API ────────────────────────────────────────────────────────
 
     def settle(self, to: str, amount: float) -> SettleResult:
-        """Execute an M2M settlement (transfer USDC between agents).
+        """Execute an M2M settlement between agents.
 
-        Args:
-            to:     Recipient node UUID or name.
-            amount: Amount in USDC (must be > 0).
-
-        Returns:
-            SettleResult with transaction_id, balances, and amount.
-
-        Raises:
-            InsufficientBalanceError: Not enough USDC.
-            NodeLockedError:          Sender node is killed/locked.
-            RecipientNotFoundError:   Target node doesn't exist.
-            SpendingLimitExceededError: Amount exceeds limit.
-            SystemHaltedError:        Circuit breaker active (after retries).
+        Gateway endpoint: POST /v1/settle?receiver_id=<uuid>&amount_micro=<int>
+        Returns: {"status": "settled", "tx_id": "..."}
+        We then fetch sender balance from /balance to populate SettleResult.
         """
         if self._spending_limit is not None and amount > self._spending_limit:
             from mono_sdk.errors import SpendingLimitExceededError
             raise SpendingLimitExceededError(
-                message=f"Amount {amount} exceeds client spending limit of {self._spending_limit} USDC",
+                message=f"Amount {amount} exceeds spending limit of {self._spending_limit} USDC",
                 detail="Client-side pre-flight check.",
             )
-        data = self._request("POST", "/settle", body={"to": to, "amount": amount})
-        return SettleResult.from_dict(data)
+
+        amount_micro = round(amount * 1_000_000)
+        data = self._request(
+            "POST",
+            f"/settle?receiver_id={to}&amount_micro={amount_micro}",
+        )
+
+        # Gateway only returns tx_id — fetch fresh balance for full SettleResult
+        tx_id = data.get("tx_id") or data.get("transaction_id", "")
+        try:
+            bal = self.balance()
+            sender_balance = float(
+                bal.get("balance_usdc", bal.get("available_usdc", 0))
+            )
+        except Exception:
+            sender_balance = 0.0
+
+        return SettleResult(
+            transaction_id    = str(tx_id),
+            sender_balance    = sender_balance,
+            recipient_balance = 0.0,   # gateway doesn't expose this
+            amount            = amount,
+            status            = "SUCCESS",
+        )
+
+    def transfer(self, to: str, amount: float, memo: str = "") -> SettleResult:
+        """Pay another agent. Alias for settle."""
+        return self.settle(to=to, amount=amount)
 
     def health(self) -> HealthStatus:
         """Get system health status (no auth required)."""
@@ -96,22 +98,21 @@ class MonoClient:
         return HealthStatus.from_dict(data)
 
     def balance(self) -> dict[str, Any]:
-        """Get the current agent's balance.
-
-        Returns:
-            Dict with available_usdc, agent_id, currency.
-        """
-        return self._request("GET", "/balance")
+        """Get the current agent's balance (authoritative from Supabase)."""
+        raw = self._request("GET", "/balance")
+        # Gateway returns balance_usdc as formatted string e.g. "1.000000"
+        # Normalise to a float under "available_usdc" for CLI compatibility
+        if "balance_usdc" in raw:
+            try:
+                raw["available_usdc"] = float(str(raw["balance_usdc"]).replace(",", ""))
+            except (ValueError, TypeError):
+                pass
+        return raw
 
     def list_nodes(self) -> list[NodeInfo]:
         """List all nodes owned by the authenticated user."""
         data = self._request("GET", "/nodes")
         return [NodeInfo.from_dict({"node": n}) for n in data.get("nodes", [])]
-
-    def get_node(self, node_id: str) -> NodeInfo:
-        """Get detailed info for a specific node."""
-        data = self._request("GET", f"/nodes?id={node_id}")
-        return NodeInfo.from_dict(data)
 
     def create_node(
         self,
@@ -119,12 +120,8 @@ class MonoClient:
         spending_limit:  float | None = None,
         wallet_provider: str = "circle",
     ) -> NodeInfo:
-        """Create a new node. The API key is returned ONCE — save it."""
-        data = self._request("POST", "/nodes", body={
-            "name":            name,
-            "spending_limit":  spending_limit,
-            "wallet_provider": wallet_provider,
-        })
+        """Create a new node via /register. API key shown once."""
+        data = self._request("POST", "/register", body={"name": name})
         return NodeInfo.from_dict(data, api_key=data.get("api_key"))
 
     def kill_node(self, node_id: str) -> dict[str, Any]:
@@ -132,21 +129,8 @@ class MonoClient:
         return self._request("DELETE", f"/nodes?id={node_id}")
 
     def charge(self, amount: float, memo: str = "") -> dict[str, Any]:
-        """Deduct amount from this agent's budget.
-
-        Args:
-            amount: USDC to deduct (must be > 0).
-            memo:   Optional description for the ledger.
-
-        Returns:
-            Dict with transaction_id, new_balance.
-        """
+        """Deduct amount from this agent's budget via /proxy."""
         return self._request("POST", "/charge", body={"amount": amount, "memo": memo})
-
-    def transfer(self, to: str, amount: float, memo: str = "") -> SettleResult:
-        """Pay another agent (alias for settle with optional memo)."""
-        data = self._request("POST", "/settle", body={"to": to, "amount": amount, "memo": memo})
-        return SettleResult.from_dict(data)
 
     # ── Internal ──────────────────────────────────────────────────────────
 
@@ -161,7 +145,7 @@ class MonoClient:
         headers = {"Content-Type": "application/json"}
         if auth:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        payload = json.dumps(body).encode("utf-8") if body else None
+        payload    = json.dumps(body).encode("utf-8") if body else None
         last_error: Exception | None = None
 
         for attempt in range(self._max_retries + 1):
