@@ -8,6 +8,7 @@ import json
 import logging
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -53,9 +54,8 @@ class MonoClient:
     def settle(self, to: str, amount: float) -> SettleResult:
         """Execute an M2M settlement between agents.
 
-        Gateway endpoint: POST /v1/settle?receiver_id=<uuid>&amount_micro=<int>
-        Returns: {"status": "settled", "tx_id": "..."}
-        We then fetch sender balance from /balance to populate SettleResult.
+        `to` accepts agent name ("Agent 07") or UUID.
+        Names with spaces are URL-encoded automatically.
         """
         if self._spending_limit is not None and amount > self._spending_limit:
             from mono_sdk.errors import SpendingLimitExceededError
@@ -64,13 +64,13 @@ class MonoClient:
                 detail="Client-side pre-flight check.",
             )
 
-        amount_micro = round(amount * 1_000_000)
+        amount_micro  = round(amount * 1_000_000)
+        receiver_enc  = urllib.parse.quote(to, safe="")   # "Agent 07" → "Agent%2007"
         data = self._request(
             "POST",
-            f"/settle?receiver_id={to}&amount_micro={amount_micro}",
+            f"/settle?receiver_id={receiver_enc}&amount_micro={amount_micro}",
         )
 
-        # Gateway only returns tx_id — fetch fresh balance for full SettleResult
         tx_id = data.get("tx_id") or data.get("transaction_id", "")
         try:
             bal = self.balance()
@@ -83,13 +83,13 @@ class MonoClient:
         return SettleResult(
             transaction_id    = str(tx_id),
             sender_balance    = sender_balance,
-            recipient_balance = 0.0,   # gateway doesn't expose this
+            recipient_balance = 0.0,
             amount            = amount,
             status            = "SUCCESS",
         )
 
     def transfer(self, to: str, amount: float, memo: str = "") -> SettleResult:
-        """Pay another agent. Alias for settle."""
+        """Pay another agent by name or UUID."""
         return self.settle(to=to, amount=amount)
 
     def health(self) -> HealthStatus:
@@ -98,10 +98,8 @@ class MonoClient:
         return HealthStatus.from_dict(data)
 
     def balance(self) -> dict[str, Any]:
-        """Get the current agent's balance (authoritative from Supabase)."""
+        """Get the current agent's balance."""
         raw = self._request("GET", "/balance")
-        # Gateway returns balance_usdc as formatted string e.g. "1.000000"
-        # Normalise to a float under "available_usdc" for CLI compatibility
         if "balance_usdc" in raw:
             try:
                 raw["available_usdc"] = float(str(raw["balance_usdc"]).replace(",", ""))
@@ -114,13 +112,8 @@ class MonoClient:
         data = self._request("GET", "/nodes")
         return [NodeInfo.from_dict({"node": n}) for n in data.get("nodes", [])]
 
-    def create_node(
-        self,
-        name:            str,
-        spending_limit:  float | None = None,
-        wallet_provider: str = "circle",
-    ) -> NodeInfo:
-        """Create a new node via /register. API key shown once."""
+    def create_node(self, name: str, spending_limit: float | None = None, wallet_provider: str = "circle") -> NodeInfo:
+        """Create a new node via /register."""
         data = self._request("POST", "/register", body={"name": name})
         return NodeInfo.from_dict(data, api_key=data.get("api_key"))
 
@@ -129,18 +122,12 @@ class MonoClient:
         return self._request("DELETE", f"/nodes?id={node_id}")
 
     def charge(self, amount: float, memo: str = "") -> dict[str, Any]:
-        """Deduct amount from this agent's budget via /proxy."""
+        """Deduct amount from this agent's budget."""
         return self._request("POST", "/charge", body={"amount": amount, "memo": memo})
 
     # ── Internal ──────────────────────────────────────────────────────────
 
-    def _request(
-        self,
-        method: str,
-        path:   str,
-        body:   dict | None = None,
-        auth:   bool = True,
-    ) -> dict[str, Any]:
+    def _request(self, method: str, path: str, body: dict | None = None, auth: bool = True) -> dict[str, Any]:
         url     = f"{self._base_url}{path}"
         headers = {"Content-Type": "application/json"}
         if auth:
@@ -153,7 +140,6 @@ class MonoClient:
                 import random
                 delay = min(DEFAULT_BACKOFF_BASE * (2 ** (attempt - 1)), DEFAULT_BACKOFF_MAX)
                 delay *= 0.75 + random.random() * 0.5
-                logger.info(f"Retry {attempt}/{self._max_retries} after {delay:.1f}s")
                 time.sleep(delay)
 
             try:
@@ -170,7 +156,6 @@ class MonoClient:
                     error_body = json.loads(e.read().decode("utf-8"))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     error_body = {"message": str(e), "code": "UNKNOWN"}
-
                 if status_code == 503 and attempt < self._max_retries:
                     last_error = SystemHaltedError(message=error_body.get("message", "System halted"))
                     continue
