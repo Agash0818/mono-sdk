@@ -1,12 +1,5 @@
 """
 mono CLI — Control plane for the mono M2M settlement network.
-
-MVP: One thing done perfectly.
-  1. User pastes API key from dashboard
-  2. CLI resolves agent identity automatically via /balance
-  3. User can immediately transfer: mono transfer --to <id> --amount 0.01
-
-The API key IS the agent. No manual assignment. No extra steps.
 """
 
 from __future__ import annotations
@@ -55,8 +48,6 @@ def tilde(path: Path) -> str:
         return str(path)
 
 
-# ── Config helpers ────────────────────────────────────────────────────────────
-
 def load_config() -> dict:
     if CONFIG_FILE.exists():
         try:
@@ -94,8 +85,6 @@ def get_client() -> MonoClient:
     return MonoClient(api_key=key, base_url=get_setting("gateway_url") or DEFAULT_API)
 
 
-# ── Shell profile ─────────────────────────────────────────────────────────────
-
 def detect_shell_profile() -> Path:
     shell = os.environ.get("SHELL", "")
     home  = Path.home()
@@ -121,11 +110,6 @@ def write_env_to_profile(key: str, value: str) -> None:
 
 
 def _resolve_agent(api_key: str, gateway_url: str) -> dict:
-    """
-    Call /balance to resolve which agent this key belongs to.
-    Returns dict with agent_id, agent_name, balance_usdc.
-    Never raises — returns empty dict on failure.
-    """
     try:
         client = MonoClient(api_key=api_key, base_url=gateway_url)
         bal    = client.balance()
@@ -142,27 +126,26 @@ def _resolve_agent(api_key: str, gateway_url: str) -> dict:
 
 def cmd_init(args: argparse.Namespace) -> None:
     """
-    MVP setup flow:
-    1. Ask for API key (or detect existing)
-    2. Call /balance → resolve agent_id + agent_name automatically
-    3. Save to ~/.mono/config.json
-    4. Show: ✅ Connected as <Agent Name> · $X.XX USDC
+    Setup flow — called automatically by install.sh or manually.
+    --from-installer flag suppresses the header so the full install
+    feels like one unbroken flow, not two separate commands.
     """
-    print()
-    print(f"  {BOLD}mono init{R}  Setting up your environment\n")
+    from_installer = getattr(args, "from_installer", False)
+
+    # Only show the header when running `mono init` manually
+    if not from_installer:
+        print()
+        print(f"  {BOLD}mono init{R}  Setting up your environment\n")
 
     cfg      = load_config()
     existing = get_api_key()
 
-    # ── Step 1: Get API key ───────────────────────────────────────────────────
-    if existing and not args.force:
-        # Key exists — but still resolve agent identity to confirm it works
+    if existing and not getattr(args, "force", False):
         masked = f"{existing[:15]}...{existing[-4:]}"
         print(f"  {GRN}✓{R}  API key:  {masked}\n")
         api_key = existing
     else:
-        # New setup: ask for key
-        print(f"  {BOLD}Where to get your API key:{R}")
+        print(f"  {BOLD}Get your API key:{R}")
         print(f"  {DIM}monospay.com/dashboard → Agents → your agent → Issue API key{R}\n")
         try:
             api_key = input("  Paste API key: ").strip()
@@ -175,109 +158,43 @@ def cmd_init(args: argparse.Namespace) -> None:
             sys.exit(0)
 
         if not api_key.startswith("mono_live_"):
-            print(f"\n  {YLW}!{R}  Key should start with 'mono_live_' — double-check the dashboard.\n")
+            print(f"\n  {YLW}!{R}  Key should start with 'mono_live_'\n")
 
-    # ── Step 2: Save config ───────────────────────────────────────────────────
     gateway_url = DEFAULT_API
-    cfg.update({
-        "api_key":     api_key,
-        "gateway_url": gateway_url,
-        "chain":       "base",
-        "chain_id":    8453,
-    })
+    cfg.update({"api_key": api_key, "gateway_url": gateway_url, "chain": "base", "chain_id": 8453})
     save_config(cfg)
-
-    # Write to shell profile so key persists across terminal sessions
     write_env_to_profile("MONO_API_KEY", api_key)
 
-    # ── Step 3: Resolve agent identity via /balance ───────────────────────────
     print(f"  Connecting…", end="", flush=True)
-
     agent = _resolve_agent(api_key, gateway_url)
 
     if not agent:
-        print(f"\r  {RED}✗{R}  Could not connect — check your API key and try again.\n")
-        print(f"     Run: {BOLD}mono health{R} to check the gateway.\n")
+        print(f"\r  {RED}✗{R}  Could not connect — check your API key.\n")
         sys.exit(1)
 
-    # Save agent identity so all future commands know which agent this is
     cfg["agent_id"]   = agent["agent_id"]
     cfg["agent_name"] = agent["agent_name"]
     save_config(cfg)
 
-    # ── Step 4: Show result — the "Aha moment" ────────────────────────────────
     name    = agent["agent_name"] or "Agent"
     balance = agent["balance"]
 
-    print(f"\r  {GRN}✓{R}  Connected to Base Mainnet")
+    print(f"\r  {GRN}✓{R}  Connected to Base Mainnet              ")
     print()
-    print(
-        f"  {BOLD}{GRN}✅ Setup complete.{R} "
-        f"Connected as {BOLD}{name}{R}. "
-        f"Your balance: {BOLD}{balance:.2f} USDC{R}"
-    )
+    print(f"  {BOLD}{GRN}✅ Setup complete.{R} Connected as {BOLD}{name}{R}. Your balance: {BOLD}{balance:.2f} USDC{R}")
     print()
-    print(f"  {DIM}Next steps:{R}")
-    print(f"  {DIM}  mono balance                           — check balance{R}")
-    print(f"  {DIM}  mono transfer --to <agent_id> --amount 1.00{R}")
-    print()
+    if not from_installer:
+        print(f"  {DIM}mono balance{R}")
+        print(f"  {DIM}mono transfer --to <agent_id> --amount 1.00{R}")
+        print()
 
 
-# ── mono config ───────────────────────────────────────────────────────────────
-
-def cmd_config_show(args: argparse.Namespace) -> None:
-    cfg = load_config()
-    if not cfg:
-        print("\n  No config found. Run: mono init\n")
-        return
-    print(f"\n  Config:  {tilde(CONFIG_FILE)}\n")
-    for k, v in cfg.items():
-        if k in _INTERNAL_KEYS:
-            continue
-        if k == "api_key":
-            v = f"{str(v)[:15]}...{str(v)[-4:]}" if v else "(not set)"
-        print(f"  {k:<22} {v}")
-    print()
-
-
-def cmd_config_set(args: argparse.Namespace) -> None:
-    cfg = load_config()
-    cfg[args.key] = args.value
-    save_config(cfg)
-    print(f"\n  {GRN}✓{R}  {args.key} = {args.value}\n")
-
-
-def cmd_config_clear(args: argparse.Namespace) -> None:
-    if CONFIG_FILE.exists():
-        CONFIG_FILE.unlink()
-    print(f"\n  {GRN}✓{R}  Config cleared: {tilde(CONFIG_FILE)}\n")
-
-
-# ── mono health ───────────────────────────────────────────────────────────────
-
-def cmd_health(args: argparse.Namespace) -> None:
-    gateway = get_setting("gateway_url") or DEFAULT_API
-    try:
-        req = urllib.request.Request(f"{gateway.rstrip('/')}/health")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            h = json.loads(resp.read())
-    except Exception:
-        print(f"\n  {RED}✗{R}  Gateway unreachable: {gateway}\n")
-        return
-    st   = h.get("status", "UNKNOWN")
-    icon = "✅" if st in ("HEALTHY", "OK") else ("⚠️" if st == "WARNING" else "❌")
-    print(f"\n{icon}  {st}")
-    print(f"   API:      {gateway}\n")
-
-
-# ── Low-balance warning ───────────────────────────────────────────────────────
+# ── mono balance ──────────────────────────────────────────────────────────────
 
 def _low_balance_warn(balance: float) -> None:
     if balance < 1.00:
         print(f"  {YLW}⚠️{R}  Low balance — top up at monospay.com/dashboard")
 
-
-# ── mono balance ──────────────────────────────────────────────────────────────
 
 def cmd_balance(args: argparse.Namespace) -> None:
     client = get_client()
@@ -327,6 +244,50 @@ def cmd_charge(args: argparse.Namespace) -> None:
     print()
 
 
+# ── mono health ───────────────────────────────────────────────────────────────
+
+def cmd_health(args: argparse.Namespace) -> None:
+    gateway = get_setting("gateway_url") or DEFAULT_API
+    try:
+        req = urllib.request.Request(f"{gateway.rstrip('/')}/health")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            h = json.loads(resp.read())
+        st   = h.get("status", "UNKNOWN")
+        icon = "✅" if st in ("HEALTHY", "OK") else ("⚠️" if st == "WARNING" else "❌")
+        print(f"\n{icon}  {st}  —  {gateway}\n")
+    except Exception:
+        print(f"\n  {RED}✗{R}  Gateway unreachable: {gateway}\n")
+
+
+# ── mono config ───────────────────────────────────────────────────────────────
+
+def cmd_config_show(args: argparse.Namespace) -> None:
+    cfg = load_config()
+    if not cfg:
+        print("\n  No config. Run: mono init\n")
+        return
+    print(f"\n  Config:  {tilde(CONFIG_FILE)}\n")
+    for k, v in cfg.items():
+        if k in _INTERNAL_KEYS: continue
+        if k == "api_key":
+            v = f"{str(v)[:15]}...{str(v)[-4:]}" if v else "(not set)"
+        print(f"  {k:<22} {v}")
+    print()
+
+
+def cmd_config_set(args: argparse.Namespace) -> None:
+    cfg = load_config()
+    cfg[args.key] = args.value
+    save_config(cfg)
+    print(f"\n  {GRN}✓{R}  {args.key} = {args.value}\n")
+
+
+def cmd_config_clear(args: argparse.Namespace) -> None:
+    if CONFIG_FILE.exists():
+        CONFIG_FILE.unlink()
+    print(f"\n  {GRN}✓{R}  Config cleared\n")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -339,47 +300,37 @@ def main() -> None:
             "  mono init                                # Paste your API key\n"
             "  mono balance                             # Check balance\n"
             "  mono transfer --to <agent_id> --amount 1.00\n"
-            "\n"
-            "More commands:\n"
-            "  mono settle --to <agent_id> --amount 1.00\n"
-            "  mono health\n"
-            "  mono config show\n"
         ),
     )
     sub = parser.add_subparsers(dest="command", metavar="command")
 
-    # init
     p_init = sub.add_parser("init", help="Set up your API key")
     p_init.add_argument("--force", action="store_true", help="Re-enter key even if already set")
+    # Hidden flag used by install.sh to suppress the header
+    p_init.add_argument("--from-installer", action="store_true", help=argparse.SUPPRESS)
 
-    # balance
     sub.add_parser("balance", help="Show your USDC balance")
 
-    # transfer
     p_tr = sub.add_parser("transfer", help="Send USDC to another agent")
     p_tr.add_argument("--to",     required=True,             help="Recipient agent ID")
     p_tr.add_argument("--amount", required=True, type=float, help="Amount in USDC")
 
-    # settle
     p_se = sub.add_parser("settle", help="Settle USDC to another agent")
     p_se.add_argument("--to",     required=True,             help="Recipient agent ID")
     p_se.add_argument("--amount", required=True, type=float, help="Amount in USDC")
 
-    # charge
     p_charge = sub.add_parser("charge", help="Deduct from agent budget")
     p_charge.add_argument("amount", type=float)
     p_charge.add_argument("memo", nargs="?", default="")
 
-    # health
     sub.add_parser("health", help="Check gateway status")
 
-    # config
     p_cfg   = sub.add_parser("config", help="Manage local config")
     cfg_sub = p_cfg.add_subparsers(dest="cfg_cmd", metavar="subcommand")
-    cfg_sub.add_parser("show",  help="Show config")
-    p_cset  = cfg_sub.add_parser("set", help="Set a value")
+    cfg_sub.add_parser("show")
+    p_cset  = cfg_sub.add_parser("set")
     p_cset.add_argument("key"); p_cset.add_argument("value")
-    cfg_sub.add_parser("clear", help="Clear config")
+    cfg_sub.add_parser("clear")
 
     args = parser.parse_args()
 
