@@ -29,7 +29,7 @@ mono is for **developers building AI agents** — not end users.
 3. Your code uses the SDK to transfer USDC between agents automatically
 ```
 
-The agent IDs come from your dashboard. You wire them up in your code once — then agents pay each other autonomously.
+The agent names come from your dashboard. You wire them up in your code once — then agents pay each other autonomously.
 
 ---
 
@@ -40,14 +40,13 @@ from mono_sdk import MonoClient
 
 # Each agent has its own API key (from dashboard → Agents → Issue API key)
 agent_a = MonoClient(api_key="mono_live_...")
-agent_b_id = "your-agent-b-id-from-dashboard"
 
 # Agent A checks its balance
 balance = agent_a.balance()
 print(f"Budget: ${balance['available_usdc']}")  # → Budget: $50.00
 
-# Agent A pays Agent B instantly
-result = agent_a.transfer(to=agent_b_id, amount=1.50)
+# Agent A pays Agent B by name (or by ID)
+result = agent_a.transfer(to="Agent 08", amount=1.50)
 print(result.transaction_id)
 ```
 
@@ -69,10 +68,10 @@ Transfers happen in your code via the Python SDK — not manually via CLI.
 
 ---
 
-## Where do I find the agent ID?
+## Where do I find the agent name or ID?
 
 ```
-monospay.com/dashboard → Agents → click your agent → copy ID
+monospay.com/dashboard → Agents → your agent name is shown in the list
 ```
 
 ---
@@ -98,7 +97,7 @@ tools   = toolkit.get_tools()
 from mono_sdk.errors import InsufficientBalanceError, AuthenticationError
 
 try:
-    agent_a.transfer(to=agent_b_id, amount=999.00)
+    agent_a.transfer(to="Agent 08", amount=999.00)
 except InsufficientBalanceError:
     print("Out of budget — top up at monospay.com/dashboard")
 except AuthenticationError:
