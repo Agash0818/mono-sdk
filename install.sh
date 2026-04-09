@@ -4,7 +4,7 @@
 # One command does everything:
 #   curl -fsSL https://monospay.com/install.sh | bash
 #
-# Flow: install → ask for API key → ✅ Connected as <Agent> · $X.XX USDC
+# Flow: install → clear old key → ask for API key → ✅ Connected as <Agent>
 
 set -euo pipefail
 
@@ -46,7 +46,7 @@ elif command -v pip  &>/dev/null; then PIP=pip
 else err "pip not found."; exit 1
 fi
 
-# ── Remove old version ────────────────────────────────────────────────────────
+# ── Remove old SDK installation ───────────────────────────────────────────────
 if command -v pipx &>/dev/null; then
   pipx uninstall mono-m2m-sdk 2>/dev/null || true
 fi
@@ -59,6 +59,36 @@ for BIN in "${HOME}/.local/bin/mono" \
            "$(python3 -m site --user-base 2>/dev/null)/bin/mono"; do
   [[ -f "$BIN" ]] && rm -f "$BIN" 2>/dev/null || true
 done
+
+# ── Clear saved API key and agent config ──────────────────────────────────────
+# The key is machine-wide (not per-folder). On a fresh install we always
+# clear it so the user is prompted — regardless of what was there before.
+MONO_CONFIG="${HOME}/.mono/config.json"
+if [[ -f "$MONO_CONFIG" ]]; then
+  # Remove api_key, agent_id, agent_name — keep other settings (gateway_url etc.)
+  if command -v python3 &>/dev/null; then
+    python3 - <<'PYEOF'
+import json, pathlib
+p = pathlib.Path.home() / ".mono" / "config.json"
+if p.exists():
+    cfg = json.loads(p.read_text())
+    for k in ("api_key", "agent_id", "agent_name"):
+        cfg.pop(k, None)
+    p.write_text(json.dumps(cfg, indent=2))
+PYEOF
+  fi
+fi
+
+# Remove MONO_API_KEY from shell profile so it doesn't shadow the new key
+for PROFILE in "${HOME}/.zshrc" "${HOME}/.bash_profile" "${HOME}/.profile"; do
+  if [[ -f "$PROFILE" ]]; then
+    # Remove lines that set MONO_API_KEY
+    grep -v 'export MONO_API_KEY=' "$PROFILE" > "${PROFILE}.tmp" 2>/dev/null \
+      && mv "${PROFILE}.tmp" "$PROFILE" || true
+  fi
+done
+
+ok "Previous config cleared"
 
 # ── Install ───────────────────────────────────────────────────────────────────
 if command -v pipx &>/dev/null; then
@@ -74,8 +104,8 @@ fi
 
 # ── Verify ────────────────────────────────────────────────────────────────────
 MONO_BIN=""
-if   command -v mono &>/dev/null;                  then MONO_BIN="mono"
-elif [[ -x "${HOME}/.local/bin/mono" ]];           then MONO_BIN="${HOME}/.local/bin/mono"
+if   command -v mono &>/dev/null;        then MONO_BIN="mono"
+elif [[ -x "${HOME}/.local/bin/mono" ]]; then MONO_BIN="${HOME}/.local/bin/mono"
 fi
 
 if [[ -z "$MONO_BIN" ]]; then
@@ -88,18 +118,14 @@ if [[ -z "$MONO_BIN" ]]; then
   exit 0
 fi
 
-# Verify import works
 if python3 -c "import mono_sdk; print(f'mono_sdk v{mono_sdk.__version__}')" 2>/dev/null | grep -q "mono_sdk"; then
-  ok "$( python3 -c "import mono_sdk; print(f'mono_sdk v{mono_sdk.__version__} imported successfully')" )"
+  ok "$(python3 -c "import mono_sdk; print(f'mono_sdk v{mono_sdk.__version__} imported successfully')")"
 fi
-
-ok "mono CLI available: $( command -v mono || echo "${HOME}/.local/bin/mono" )"
+ok "mono CLI available: $(command -v mono || echo "${HOME}/.local/bin/mono")"
 
 echo
-echo -e "  Installation complete."
-echo -e "  Running setup...\n"
+echo -e "  ${GRN}Installation complete.${R}"
+echo -e "  Running ${BOLD}mono init${R} to configure your environment...\n"
 
-# ── Hand off — always ask for API key on fresh install ────────────────────────
-# --force ensures the user is always prompted for their key, even if a
-# previous key exists. This makes `curl | bash` a complete one-command setup.
-exec "$MONO_BIN" init --force
+# ── Hand off to CLI — key is cleared, so user will always be prompted ─────────
+exec "$MONO_BIN" init
