@@ -125,28 +125,31 @@ def _resolve_agent(api_key: str, gateway_url: str) -> dict:
 # ── mono init ─────────────────────────────────────────────────────────────────
 
 def cmd_init(args: argparse.Namespace) -> None:
-    """
-    Setup flow — called automatically by install.sh or manually.
-    --from-installer flag suppresses the header so the full install
-    feels like one unbroken flow, not two separate commands.
-    """
     from_installer = getattr(args, "from_installer", False)
 
-    # Only show the header when running `mono init` manually
     if not from_installer:
         print()
         print(f"  {BOLD}mono init{R}  Setting up your environment\n")
 
-    cfg      = load_config()
-    existing = get_api_key()
+    cfg = load_config()
 
-    if existing and not getattr(args, "force", False):
-        masked = f"{existing[:15]}...{existing[-4:]}"
-        print(f"  {GRN}✓{R}  API key:  {masked}\n")
-        api_key = existing
+    # When called from installer: ignore env var — always ask the user.
+    # The env var may still be loaded in the current shell session even
+    # after install.sh removed it from ~/.zshrc.
+    if from_installer:
+        existing = cfg.get("api_key")   # only check saved config, not env
     else:
+        existing = get_api_key()
+
+    if existing:
+        # Key found in config — use it silently (normal mono init reuse)
+        api_key = existing
+        masked  = f"{existing[:15]}...{existing[-4:]}"
+        print(f"  {GRN}✓{R}  API key:  {masked}\n")
+    else:
+        # No key anywhere — ask the user
         print(f"  {BOLD}Get your API key:{R}")
-        print(f"  {DIM}monospay.com/dashboard → Agents → your agent → Issue API key{R}\n")
+        print(f"  {DIM}monospay.com/dashboard → Agents → Issue API key{R}\n")
         try:
             api_key = input("  Paste API key: ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -154,7 +157,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             sys.exit(0)
 
         if not api_key:
-            print(f"\n  {YLW}!{R}  No key entered. Run mono init again when ready.\n")
+            print(f"\n  {YLW}!{R}  No key entered. Run: mono init\n")
             sys.exit(0)
 
         if not api_key.startswith("mono_live_"):
@@ -183,10 +186,6 @@ def cmd_init(args: argparse.Namespace) -> None:
     print()
     print(f"  {BOLD}{GRN}✅ Setup complete.{R} Connected as {BOLD}{name}{R}. Your balance: {BOLD}{balance:.2f} USDC{R}")
     print()
-    if not from_installer:
-        print(f"  {DIM}mono balance{R}")
-        print(f"  {DIM}mono transfer --to <agent_id> --amount 1.00{R}")
-        print()
 
 
 # ── mono balance ──────────────────────────────────────────────────────────────
@@ -305,9 +304,8 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", metavar="command")
 
     p_init = sub.add_parser("init", help="Set up your API key")
-    p_init.add_argument("--force", action="store_true", help="Re-enter key even if already set")
-    # Hidden flag used by install.sh to suppress the header
-    p_init.add_argument("--from-installer", action="store_true", help=argparse.SUPPRESS)
+    p_init.add_argument("--from-installer", dest="from_installer",
+                        action="store_true", help=argparse.SUPPRESS)
 
     sub.add_parser("balance", help="Show your USDC balance")
 

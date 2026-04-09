@@ -10,7 +10,7 @@ from mono_sdk.errors import (
 )
 from mono_sdk.models import SettleResult, NodeInfo, HealthStatus, TrustStats
 
-__version__ = "0.4.10"
+__version__ = "0.4.11"
 
 __all__ = [
     "MonoClient", "MonoError", "AuthenticationError",
