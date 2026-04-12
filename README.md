@@ -94,40 +94,14 @@ No wallets to manage. No gas. No KYC.
 
 ---
 
-## Signed Transfers (Zero-Trust)
+## Security
 
-All money movement uses ECDSA signatures. No API key can move funds — only a cryptographic proof from the sender's private key.
+- All transfers are cryptographically signed — no API key can move funds
+- Replay protection built in
+- Server-side spending limits and daily budgets
+- Open-source smart contract on [Base](https://basescan.org/address/0xA9DC3105ec1A84E4Bc3c9702dFC772a6efA2CDBA) (verified)
 
-### Canonical message format
-
-```
-mono-transfer:{sender}:{receiver}:{amount}:{nonce}:{timestamp}
-```
-
-- `sender` / `receiver` — lowercase 0x addresses
-- `amount` — 6 decimal fixed point (e.g. `1.500000`)
-- `nonce` — UUID v4
-- `timestamp` — epoch milliseconds
-
-### Signing with eth-account
-
-```python
-from eth_account import Account
-from eth_account.messages import encode_defunct
-import uuid, time
-
-sender = "0xabc..."
-receiver = "0xdef..."
-amount = "1.500000"
-nonce = str(uuid.uuid4())
-ts = int(time.time() * 1000)
-
-canonical = f"mono-transfer:{sender}:{receiver}:{amount}:{nonce}:{ts}"
-
-msg = encode_defunct(text=canonical)
-signed = Account.sign_message(msg, private_key="0x...")
-signature = f"0x{signed.signature.hex()}"
-```
+> See [SECURITY.md](SECURITY.md) for technical details on the signing protocol.
 
 ### Using the SDK
 
@@ -141,10 +115,10 @@ result = client.signed_transfer(
     amount=5.00,
     private_key="0xYourPrivateKey",
 )
-# -> { "transaction_id": "...", "sender_new_balance": 45.0, "fee": 0.015 }
+# -> { "transaction_id": "...", "sender_new_balance": 45.0 }
 ```
 
-> **Deprecated:** `transfer()` and `settle()` use API-key-based auth and are permanently disabled on the gateway (HTTP 410). Use `signed_transfer()` or MCP tools instead.
+> **Deprecated:** `transfer()` and `settle()` are permanently disabled. Use `signed_transfer()` or MCP tools instead.
 
 ---
 
@@ -251,11 +225,10 @@ except AuthenticationError:
 
 ## What's in v0.6
 
-- **MCP Server** — `mono-mcp` entry point for Claude Desktop, Cursor, Windsurf
-- **ECDSA signed transfers** — zero-trust auth, no API key can move funds
+- **MCP Server** — `mono-mcp` works with Claude Desktop, Cursor, Windsurf
+- **Signed transfers** — cryptographic auth, no API key can move funds
 - **Spending limits** — `set_limits(spending_limit=100, daily_budget=25)`
 - **Transaction history** — `transactions(limit=20)`
-- **API-key transfers retired** — `transfer()` / `settle()` return HTTP 410
 
 ---
 
