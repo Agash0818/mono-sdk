@@ -223,12 +223,13 @@ except AuthenticationError:
 
 ---
 
-## What's in v0.6
+## Why monospay
 
-- **MCP Server** — `mono-mcp` works with Claude Desktop, Cursor, Windsurf
-- **Signed transfers** — cryptographic auth, no API key can move funds
-- **Spending limits** — `set_limits(spending_limit=100, daily_budget=25)`
-- **Transaction history** — `transactions(limit=20)`
+- **10 minutes to first payment** — `pip install`, set keys, your agent pays
+- **Works with every AI framework** — LangChain, CrewAI, OpenAI, Claude, Cursor, Google ADK
+- **Sub-cent transactions** — no $0.30 minimum like card networks
+- **Agents don't need bank accounts** — just a wallet and a private key
+- **You stay in control** — spending limits, daily budgets, transaction history
 
 ---
 
