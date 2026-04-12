@@ -1,4 +1,4 @@
-# mono SDK
+# monospay
 
 [![PyPI](https://img.shields.io/pypi/v/monospay)](https://pypi.org/project/monospay/)
 [![Python](https://img.shields.io/pypi/pyversions/monospay)](https://pypi.org/project/monospay/)
@@ -12,8 +12,8 @@
 ![Cursor](https://img.shields.io/badge/Cursor-MCP_server-blue)
 ![Google ADK](https://img.shields.io/badge/Google_ADK-compatible-blue)
 
-Financial infrastructure for autonomous AI agents.  
-Your agent can think. Now it can pay.
+Payment infrastructure for AI agents.  
+`pip install monospay` · Your agent can pay.
 
 ![Demo](demo.gif)
 
@@ -22,7 +22,33 @@ Your agent can think. Now it can pay.
 ## Install
 
 ```bash
-pip install monospay
+pip install monospay[mcp]
+```
+
+Then run:
+
+```bash
+mono-mcp
+```
+
+```
+  monospay · payment infrastructure for AI agents
+  ─────────────────────────────────────────────────
+
+  Almost there! Two steps to connect your agent:
+
+  1. Get your keys at monospay.com/dashboard
+     → Agents → select agent → Issue API key
+
+  2. export MONO_API_KEY=mono_live_...
+     export MONO_PRIVATE_KEY=0x...
+```
+
+Set your keys, run `mono-mcp` again:
+
+```
+  ✓ monospay ready — your agent can pay.
+    Tools: mono_balance, mono_transfer, mono_transactions
 ```
 
 Works on macOS, Linux, Windows · Python 3.9+
