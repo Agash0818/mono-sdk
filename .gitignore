@@ -1,19 +1,20 @@
-CLAUDE.md
+sdk/
+sdk_build/
 dist/
+build/
 *.egg-info/
 __pycache__/
 *.pyc
+*.so
+*.pyd
 .env
 .env.local
 .pypirc
 *.key
 *.pem
-sdk_build/
-_nuitka_build/
-*.so
-*.pyd
+CLAUDE.md
 
-# Ghost-Dateien im Repo-Root — echter Code liegt nur in mono_sdk/
+# Root-level duplicates (real code lives in mono_sdk/)
 /__init__.py
 /cli.py
 /client.py
@@ -22,6 +23,12 @@ _nuitka_build/
 /langchain_tools.py
 /openai_functions.py
 /build_wheels.py
-/sdk/
-/dist/
+/test_cli.py
+/demo.tape
+/install.sh
+/mono_mcp_server.py
+/MCP_SERVER.md
+/demo.cast
+/demo_record.sh
+/_nuitka_build/
 /mono_settlement.egg-info/
