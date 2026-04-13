@@ -33,6 +33,34 @@ Your AI agent can send payments.
 }
 ```
 
+Restart Claude Desktop. Ask: **"Check my monospay balance"**
+
+Ready to move money? Add your private key:
+
+```json
+{
+  "mcpServers": {
+    "monospay": {
+      "command": "npx",
+      "args": ["-y", "monospay-mcp"],
+      "env": {
+        "MONO_API_KEY": "mono_live_...",
+        "MONO_PRIVATE_KEY": "0x..."
+      }
+    }
+  }
+}
+```
+
+Then ask: **"Send $1.00 to 0x..."**
+
+| With API key only | + Private Key |
+|---|---|
+| ✅ Check balance | ✅ Check balance |
+| ✅ View transactions | ✅ View transactions |
+| ✅ Set spending limits | ✅ Set spending limits |
+| ❌ Send payments | ✅ **Send payments** |
+
 **Claude Code** — one command:
 
 ```bash
@@ -137,32 +165,6 @@ from mono_sdk.langchain_tools import MonoToolkit
 toolkit = MonoToolkit(api_key="mono_live_...")
 tools   = toolkit.get_tools()
 ```
-
----
-
-## MCP Server — details
-
-| With API key only | + Private Key |
-|---|---|
-| ✅ Check balance | ✅ Check balance |
-| ✅ View transactions | ✅ View transactions |
-| ✅ Set spending limits | ✅ Set spending limits |
-| ❌ Transfer USDC | ✅ **Transfer USDC** |
-
-Your private key never leaves your machine.
-
-<details>
-<summary>Alternative: pip / uvx</summary>
-
-```bash
-pip install "monospay[mcp]"
-mono-mcp
-```
-
-Or with uvx: `uvx --from "monospay[mcp]" mono-mcp`
-</details>
-
-Available tools: `mono_balance`, `mono_transfer`, `mono_transactions`, `mono_health`.
 
 ---
 
