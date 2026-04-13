@@ -12,8 +12,8 @@ def get_mono_tools() -> list[dict]:
             "function": {
                 "name": "mono_llm_inference",
                 "description": (
-                    "Call an LLM via mono off-chain settlement. "
-                    "Cost: $0.00005-$0.0002 per call, no gas fees."
+                    "Call an LLM via monospay. "
+                    "Cost: $0.00005-$0.0002 per call."
                 ),
                 "parameters": {
                     "type": "object",

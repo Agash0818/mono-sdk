@@ -40,8 +40,8 @@ class MonoLLMInput(BaseModel):
 class MonoLLMTool(_BaseTool):
     name: str = "mono_llm_inference"
     description: str = (
-        "Call an LLM via mono off-chain settlement. "
-        "Cost: $0.00005-$0.0002 per call, no gas fees. "
+        "Call an LLM via monospay. "
+        "Cost: $0.00005-$0.0002 per call. "
         "Use this tool for low-cost LLM access."
     )
     args_schema: Type[BaseModel] = MonoLLMInput
@@ -84,7 +84,7 @@ class MonoRPCInput(BaseModel):
 class MonoRPCTool(_BaseTool):
     name: str = "mono_blockchain_rpc"
     description: str = (
-        "Execute blockchain JSON-RPC calls via mono settlement. "
+        "Execute blockchain JSON-RPC calls via monospay. "
         "Cost: $0.000005-$0.00001 per call."
     )
     args_schema: Type[BaseModel] = MonoRPCInput
@@ -116,7 +116,7 @@ class MonoPriceInput(BaseModel):
 class MonoPriceTool(_BaseTool):
     name: str = "mono_price_oracle"
     description: str = (
-        "Get real-time crypto prices via mono settlement. Cost: $0.00005 per call."
+        "Get real-time crypto prices via monospay. Cost: $0.00005 per call."
     )
     args_schema: Type[BaseModel] = MonoPriceInput
 

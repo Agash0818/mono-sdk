@@ -1,5 +1,5 @@
 """
-MonoClient: The core SDK client for the mono M2M settlement network.
+MonoClient: The core SDK client for monospay.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ DEFAULT_BACKOFF_MAX  = 16.0
 
 
 class MonoClient:
-    """Client for the mono M2M settlement API."""
+    """Client for the monospay API."""
 
     def __init__(
         self,
@@ -52,7 +52,7 @@ class MonoClient:
     # ── Public API ────────────────────────────────────────────────────────
 
     def settle(self, to: str, amount: float, idempotency_key: str | None = None) -> SettleResult:
-        """Execute an M2M settlement between agents.
+        """Send a payment between agents.
 
         `to` accepts agent name ("Agent 07") or UUID.
         """
@@ -148,10 +148,9 @@ class MonoClient:
         supabase_url: str = "https://vcearjwptzdijurqxyra.supabase.co",
         supabase_anon_key: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZjZWFyandwdHpkaWp1cnF4eXJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3Njk4MDcsImV4cCI6MjA4OTM0NTgwN30.F7AWQVq_Qq4zs8WPwRKbNsHgoibqRAC5UOFCB1a-tGI",
     ) -> dict[str, Any]:
-        """Execute a zero-trust ECDSA-signed transfer via Supabase Edge Function.
+        """Send a cryptographically signed transfer.
 
-        No API key needed — the secp256k1 signature IS the auth.
-        Uses EIP-191 personal_sign for verification.
+        Requires a private key — no API key can move funds.
 
         Args:
             to_wallet:   Recipient 0x wallet address.
@@ -188,7 +187,7 @@ class MonoClient:
         amount_fixed = f"{amount:.6f}"
         canonical = f"mono-transfer:{sender}:{receiver}:{amount_fixed}:{nonce}:{timestamp}"
 
-        # EIP-191 personal_sign
+        # Sign the canonical message
         msg = encode_defunct(text=canonical)
         signed = Account.sign_message(msg, private_key=private_key)
         signature = signed.signature.hex()

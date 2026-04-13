@@ -48,7 +48,7 @@ class RecipientNotFoundError(MonoError):
 
 
 class SystemHaltedError(MonoError):
-    """Circuit breaker is active. All settlements paused. (HTTP 503)
+    """Circuit breaker is active. All payments paused. (HTTP 503)
 
     The SDK will automatically retry with exponential backoff when this
     error is encountered, up to `max_retries` attempts.

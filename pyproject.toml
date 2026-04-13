@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "monospay"
-version = "0.6.2"
+version = "0.6.3"
 description = "Payments for AI agents — monospay.com"
 readme = "README.md"
 requires-python = ">=3.9"

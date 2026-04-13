@@ -1,5 +1,5 @@
 """
-mono CLI — Control plane for the mono M2M settlement network.
+mono CLI — command-line interface for monospay.
 """
 
 from __future__ import annotations

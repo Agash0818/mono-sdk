@@ -111,7 +111,7 @@ def _format_result(data: dict[str, Any]) -> str:
     return json.dumps(data, indent=2)
 
 
-# ── ECDSA Signing ─────────────────────────────────────────────────────────────
+# ── Signing ───────────────────────────────────────────────────────────────────
 
 def _sign_transfer(receiver: str, amount: float) -> dict[str, Any]:
     """Build canonical message, sign with private key, return signed payload."""
@@ -170,7 +170,7 @@ mcp = FastMCP(
 @mcp.tool(
     name="mono_health",
     annotations={
-        "title": "Gateway Health Check",
+        "title": "Health Check",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
@@ -213,7 +213,7 @@ async def mono_balance() -> str:
     }, indent=2)
 
 
-# ── Tool: Transfer (ECDSA signed, zero-trust) ────────────────────────────────
+# ── Tool: Transfer ────────────────────────────────────────────────────────────
 
 class TransferInput(BaseModel):
     """Send USDC to another agent wallet."""
