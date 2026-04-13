@@ -80,7 +80,7 @@ agent_a = MonoClient(api_key="mono_live_...")
 balance = agent_a.balance()
 print(f"Budget: ${balance['available_usdc']}")  # -> Budget: $50.00
 
-# Agent A pays Agent B (cryptographically signed)
+# Agent A pays Agent B
 result = agent_a.signed_transfer(
     to_wallet="0x...",
     amount=1.50,
@@ -93,16 +93,6 @@ No wallets to manage. No gas. No KYC.
 
 ---
 
-## Security
-
-- All transfers are cryptographically signed — no API key can move funds
-- Replay protection built in
-- Server-side spending limits and daily budgets
-
-> See [SECURITY.md](SECURITY.md) for details.
-
----
-
 ## 2-Agent Example
 
 ```python
@@ -111,7 +101,7 @@ from mono_sdk import MonoClient
 agent_a = MonoClient(api_key="mono_live_A...")
 agent_b = MonoClient(api_key="mono_live_B...")
 
-# Agent A pays Agent B (cryptographically signed)
+# Agent A pays Agent B
 agent_a.signed_transfer(
     to_wallet="0xAgentB_Wallet",
     amount=0.50,
