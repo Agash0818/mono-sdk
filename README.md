@@ -19,7 +19,7 @@ Your agent can pay.
 
 ## Get started
 
-**Claude Desktop / Cursor** — paste into your config, done:
+**Claude Desktop** — paste into your config, done:
 
 ```json
 {
@@ -31,6 +31,12 @@ Your agent can pay.
     }
   }
 }
+```
+
+**Claude Code** — one command:
+
+```bash
+claude mcp add monospay -e MONO_API_KEY=mono_live_... -- npx -y monospay-mcp
 ```
 
 **Python SDK** — 3 lines of code:
