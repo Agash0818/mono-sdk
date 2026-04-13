@@ -80,7 +80,7 @@ agent_a = MonoClient(api_key="mono_live_...")
 balance = agent_a.balance()
 print(f"Budget: ${balance['available_usdc']}")  # -> Budget: $50.00
 
-# Agent A pays Agent B (zero-trust, ECDSA-signed)
+# Agent A pays Agent B (cryptographically signed)
 result = agent_a.signed_transfer(
     to_wallet="0x...",
     amount=1.50,
@@ -98,9 +98,8 @@ No wallets to manage. No gas. No KYC.
 - All transfers are cryptographically signed — no API key can move funds
 - Replay protection built in
 - Server-side spending limits and daily budgets
-- Open-source smart contract on [Base](https://basescan.org/address/0xA9DC3105ec1A84E4Bc3c9702dFC772a6efA2CDBA) (verified)
 
-> See [SECURITY.md](SECURITY.md) for technical details on the signing protocol.
+> See [SECURITY.md](SECURITY.md) for details.
 
 ---
 
@@ -112,7 +111,7 @@ from mono_sdk import MonoClient
 agent_a = MonoClient(api_key="mono_live_A...")
 agent_b = MonoClient(api_key="mono_live_B...")
 
-# Agent A pays Agent B (ECDSA-signed)
+# Agent A pays Agent B (cryptographically signed)
 agent_a.signed_transfer(
     to_wallet="0xAgentB_Wallet",
     amount=0.50,
@@ -208,5 +207,3 @@ except AuthenticationError:
 - Dashboard · [monospay.com](https://monospay.com)
 - Docs · [monospay.com/docs](https://monospay.com/docs)
 - PyPI · [monospay](https://pypi.org/project/monospay/)
-- Contract · [BaseScan 0xA9DC3105...](https://basescan.org/address/0xA9DC3105ec1A84E4Bc3c9702dFC772a6efA2CDBA)
-- Built on [Base](https://base.org) · Settled in [USDC](https://www.circle.com/usdc)
